@@ -1,13 +1,8 @@
 use actix_web::{error, post, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
-use sqlx::{SqlitePool, Executor};
-use std::env;
-
-#[derive(Deserialize, Serialize)]
-struct BlogPost {
-    name: String,
-    body: String
-}
+mod db;
+mod blog_post;
+use blog_post::BlogPost;
 
 #[derive(Deserialize, Serialize)]
 struct ApiError {
@@ -16,18 +11,11 @@ struct ApiError {
 
 #[post("/")]
 async fn create_blog_post(blog_post: web::Json<BlogPost>) -> impl Responder {
-    if let Ok(conn) = SqlitePool::connect(&env::var("DATABASE_URL").unwrap()).await {
-        match sqlx::query!(r#"
-            INSERT INTO posts(author, body)
-            VALUES (?, ?)
-        "#, blog_post.name, blog_post.body).execute(&conn).await {
-            Ok(_ok) => return HttpResponse::Ok().json(blog_post),
-            Err(err) => return HttpResponse::InternalServerError()
-            .json(ApiError {message: format!("{:?}", err) })
-        }
+    match db::insert_post(&blog_post).await {
+        Ok(_ok) => return HttpResponse::Ok().json(&blog_post),
+        Err(err) => return HttpResponse::InternalServerError()
+        .json(ApiError {message: format!("{:?}", err) })
     }
-        HttpResponse::InternalServerError()
-            .json(ApiError {message: String::from("DB connection failure")})
 }
 
 fn json_error_handler(err: error::JsonPayloadError, _req: &HttpRequest) -> error::Error {

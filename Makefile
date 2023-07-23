@@ -1,7 +1,10 @@
 post-database.db: db-init db-apply
 
 test:
-	cargo test
+	DATABASE_URL=sqlite://post-database.db cargo test
+
+start:
+	DATABASE_URL=sqlite://post-database.db cargo run
 
 db-plan:
 	atlas schema diff \
