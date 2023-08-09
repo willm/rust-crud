@@ -1,17 +1,18 @@
-use actix_web::{error, get, post, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
-use serde::{Deserialize, Serialize};
+extern crate dotenv;
 mod blog_post;
+mod config;
+mod credentials;
 mod db;
 use actix_cors::Cors;
+use actix_web::{error, get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use base64::{engine::general_purpose, Engine as _};
-use blog_post::BlogPost;
+use credentials::post_credentials;
 use db::PostDatabase;
+use dotenv::dotenv;
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
 use serde_repr::Serialize_repr;
-
-pub struct AppState {
-    db: PostDatabase,
-}
+use std::error::Error;
 
 #[derive(Deserialize, Serialize_repr)]
 #[repr(i64)]
@@ -55,6 +56,33 @@ struct Credentials {
     user: User,
 }
 
+impl Credentials {
+    pub fn new(challenge: String) -> Self {
+        Credentials {
+            challenge,
+            pub_key_cred_params: [
+                PubKeyCredParams {
+                    alg: Alg::RS256,
+                    _type: String::from("public-key"),
+                },
+                PubKeyCredParams {
+                    alg: Alg::ES256,
+                    _type: String::from("public-key"),
+                },
+            ],
+            rp: RelayingParty {
+                id: String::from(config::ORIGIN),
+                name: String::from("Rusty auth"),
+            },
+            user: User {
+                id: random_bytes_base64(),
+                name: String::from("User"),
+                display_name: String::from("User Disp"),
+            },
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct UserRequest {
     email: String,
@@ -66,66 +94,41 @@ fn random_bytes_base64() -> String {
     general_purpose::STANDARD_NO_PAD.encode(data)
 }
 
+async fn setup_challenge(
+    db: &PostDatabase,
+    email: &str,
+    challenge: &str,
+) -> Result<(), Box<dyn Error>> {
+    let user_id = &db.insert_user(email).await?;
+    db.insert_user_challenge(user_id.clone(), &challenge)
+        .await?;
+    Ok(())
+}
+
 #[get("/credentials")]
 async fn get_credentials(
     user_request: web::Query<UserRequest>,
     db: web::Data<PostDatabase>,
 ) -> impl Responder {
-    let challenge = random_bytes_base64();
-    if let Ok(user) = &db.get_user(&user_request.email).await {
+    let email = &user_request.email;
+    if let Ok(user) = &db.get_user(&email).await {
         match user {
-            Some(user) => return HttpResponse::Conflict().body("Conflict"),
+            Some(_user_id) => {
+                return HttpResponse::Conflict()
+                    .body(format!("User {} already exists, log in and retry", &email))
+            }
             None => {
-                let user_id = &db.insert_user(&user_request.email).await.unwrap();
-                &db.insert_user_challenge(user_id.clone(), &challenge).await;
+                let challenge = random_bytes_base64();
+                match setup_challenge(&db, &email, &challenge).await {
+                    Ok(_) => return HttpResponse::Ok().json(Credentials::new(challenge)),
+                    Err(err) => {
+                        return HttpResponse::InternalServerError().body(format!("{:?}", err))
+                    }
+                }
             }
         }
     }
-    HttpResponse::Ok().json(Credentials {
-        challenge,
-        pub_key_cred_params: [
-            PubKeyCredParams {
-                alg: Alg::RS256,
-                _type: String::from("public-key"),
-            },
-            PubKeyCredParams {
-                alg: Alg::ES256,
-                _type: String::from("public-key"),
-            },
-        ],
-        rp: RelayingParty {
-            id: String::from("localhost"),
-            name: String::from("Rusty auth"),
-        },
-        user: User {
-            id: random_bytes_base64(),
-            name: String::from("User"),
-            display_name: String::from("User Disp"),
-        },
-    })
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PublicKeyCredentialResponse {
-    attestation_object: String,
-
-    #[serde(rename = "clientDataJSON")]
-    client_data_json: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PublicKeyCredential {
-    id: String,
-    response: PublicKeyCredentialResponse,
-}
-
-#[post("/credentials")]
-async fn post_credentials(
-    user_request: web::Json<PublicKeyCredential>,
-    db: web::Data<PostDatabase>,
-) -> impl Responder {
-    HttpResponse::Ok().json({})
+    HttpResponse::InternalServerError().body("Failed to check user")
 }
 
 //#[post("/")]
@@ -171,6 +174,7 @@ fn configure(cfg: &mut web::ServiceConfig) {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv().ok();
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let db = db::PostDatabase::create().await.unwrap();

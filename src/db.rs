@@ -1,4 +1,3 @@
-use crate::blog_post::BlogPost;
 use sqlx::SqlitePool;
 use std::env;
 
@@ -12,6 +11,7 @@ impl PostDatabase {
         let pool = SqlitePool::connect(&env::var("DATABASE_URL").unwrap()).await?;
         Ok(Self { pool })
     }
+
     pub async fn get_user(&self, email: &str) -> Result<Option<(u32,)>, sqlx::Error> {
         let user: Option<(u32,)> = sqlx::query_as(
             r#"
@@ -25,6 +25,7 @@ impl PostDatabase {
         .await?;
         Ok(user)
     }
+
     pub async fn insert_user(&self, email: &str) -> Result<u32, sqlx::Error> {
         let user: (u32,) = sqlx::query_as(
             r#"
@@ -38,6 +39,7 @@ impl PostDatabase {
         .await?;
         Ok(user.0)
     }
+
     pub async fn insert_user_challenge(
         &self,
         user_id: u32,
@@ -55,17 +57,27 @@ impl PostDatabase {
         .await?;
         Ok(())
     }
-    async fn insert_post(&self, blog_post: &BlogPost) -> Result<(), sqlx::Error> {
-        sqlx::query!(
+
+    pub async fn user_challenge_exists(
+        &self,
+        challenge: &str,
+        email: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let challenge_count = sqlx::query_scalar!(
             r#"
-                INSERT INTO posts(author, body)
-                VALUES (?, ?)
-            "#,
-            blog_post.name,
-            blog_post.body
+                SELECT COUNT(1)
+                FROM user_credential_challenges uc
+                JOIN users u
+                ON u.id = uc.user_id
+                WHERE u.email = ?
+                AND challenge = ?
+                LIMIT 1
+             "#,
+            email,
+            challenge
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
-        Ok(())
+        Ok(challenge_count > 0)
     }
 }

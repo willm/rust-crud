@@ -11,6 +11,10 @@ const arrayBufferToBase64 = (bytes) => {
     .replace(/=/g, "");
 };
 
+const parseClientData = (encodedClientData) => {
+  return JSON.parse(new TextDecoder().decode(encodedClientData));
+};
+
 document
   .getElementById("register")
   .addEventListener("submit", async (event) => {
@@ -31,18 +35,17 @@ document
     );
     const addCredsData = {
       id: credentials.id,
+      email,
       response: {
         attestationObject: arrayBufferToBase64(
           credentials.response.attestationObject
         ),
-        clientDataJSON: arrayBufferToBase64(
-          credentials.response.attestationObject
-        ),
+        clientData: parseClientData(credentials.response.clientDataJSON),
       },
     };
     console.log(addCredsData);
     const resp = await fetch("http://localhost:8080/credentials", {
-      method: "post",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
