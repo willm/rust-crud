@@ -5,10 +5,7 @@ const b64ToArrayBuffer = async (data) => {
 };
 
 const arrayBufferToBase64 = (bytes) => {
-  return btoa(String.fromCharCode.apply(null, new Uint8Array(bytes)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(bytes)));
 };
 
 const parseClientData = (encodedClientData) => {
@@ -16,10 +13,10 @@ const parseClientData = (encodedClientData) => {
 };
 
 document
-  .getElementById("register")
-  .addEventListener("submit", async (event) => {
+  .getElementById('register')
+  .addEventListener('submit', async (event) => {
     event.preventDefault();
-    const email = document.getElementById("email").value;
+    const email = document.getElementById('email').value;
     const response = await fetch(
       `http://localhost:8080/credentials?email=${email}`
     );
@@ -27,7 +24,7 @@ document
     const challenge = await b64ToArrayBuffer(body.challenge);
     const userId = await b64ToArrayBuffer(body.user.id);
     const createCredentialsOptions = {
-      publicKey: { ...body, challenge, user: { ...body.user, id: userId } },
+      publicKey: {...body, challenge, user: {...body.user, id: userId}},
     };
     console.log(createCredentialsOptions);
     const credentials = await navigator.credentials.create(
@@ -44,10 +41,10 @@ document
       },
     };
     console.log(addCredsData);
-    const resp = await fetch("http://localhost:8080/credentials", {
-      method: "POST",
+    const resp = await fetch('http://localhost:8080/credentials', {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify(addCredsData),
     });
