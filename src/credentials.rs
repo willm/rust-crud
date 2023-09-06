@@ -44,12 +44,18 @@ impl AuthenticatorAttestationResponse {
 
 pub struct AuthenticatorData<'a> {
     rp_id_hash: &'a [u8],
+    user_present: bool,
 }
 
 impl<'a> AuthenticatorData<'a> {
     fn from_bytes(bytes: &'a Vec<u8>) -> Self {
+        // https://www.w3.org/TR/webauthn/#authenticator-data
+        let rp_id_hash = &bytes[..32];
+        let flags = &bytes[32];
+        let user_present: bool = ((flags >> 0) & 1) > 0;
         AuthenticatorData {
-            rp_id_hash: &bytes[..32],
+            rp_id_hash,
+            user_present,
         }
     }
 }
@@ -87,6 +93,9 @@ async fn verify(
             if sha_256_digest.as_ref() != authenticator_data.rp_id_hash {
                 return Ok(false);
             }
+            if !authenticator_data.user_present {
+                return Ok(false);
+            }
         }
     }
 
@@ -118,5 +127,6 @@ mod tests {
         let authenticator_data = AuthenticatorData::from_bytes(&response.auth_data);
         let sha_256_digest = digest::digest(&digest::SHA256, "localhost".as_bytes());
         assert_eq!(sha_256_digest.as_ref(), authenticator_data.rp_id_hash);
+        assert_eq!(authenticator_data.user_present, true);
     }
 }
