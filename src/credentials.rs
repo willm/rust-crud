@@ -1,6 +1,7 @@
 use crate::db::PostDatabase;
 use actix_web::{post, web, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
+use ring::digest;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -35,9 +36,21 @@ pub struct AuthenticatorAttestationResponse {
 }
 
 impl AuthenticatorAttestationResponse {
-    fn parse(encoded: &str) -> Option<Self> {
+    fn from_b64_string(encoded: &str) -> Option<Self> {
         let bytes = &general_purpose::STANDARD.decode(encoded).unwrap();
         ciborium::de::from_reader(&bytes[..]).ok()
+    }
+}
+
+pub struct AuthenticatorData<'a> {
+    rp_id_hash: &'a [u8],
+}
+
+impl<'a> AuthenticatorData<'a> {
+    fn from_bytes(bytes: &'a Vec<u8>) -> Self {
+        AuthenticatorData {
+            rp_id_hash: &bytes[..32],
+        }
     }
 }
 
@@ -63,6 +76,20 @@ async fn verify(
         return Ok(false);
     }
 
+    let attestation_response = AuthenticatorAttestationResponse::from_b64_string(
+        &public_key_credential_response.attestation_object,
+    );
+    match attestation_response {
+        None => return Ok(false),
+        Some(response) => {
+            let authenticator_data = AuthenticatorData::from_bytes(&response.auth_data);
+            let sha_256_digest = digest::digest(&digest::SHA256, crate::config::ORIGIN.as_bytes());
+            if sha_256_digest.as_ref() != authenticator_data.rp_id_hash {
+                return Ok(false);
+            }
+        }
+    }
+
     Ok(true)
 }
 
@@ -71,10 +98,6 @@ pub async fn post_credentials(
     user_request: web::Json<PublicKeyCredential>,
     db: web::Data<PostDatabase>,
 ) -> impl Responder {
-    println!(
-        "HELLO WHAT?? {:?}",
-        user_request.response.attestation_object.as_bytes()
-    );
     let result = verify(&db, &user_request.email, &user_request.response).await;
     if let Ok(_) = result {
         return HttpResponse::Ok().body("");
@@ -88,9 +111,12 @@ mod tests {
     #[test]
     fn verifying_att() {
         let raw_attestation_object = "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVjFSZYN5YgOjGh0NBcPZHZgW4/krrmihjLHmVzzuoMdl2NFAAAAAAAAAAAAAAAAAAAAAAAAAAAAQQEA4wyJikPPpb0YSIMW3D6jT2Du0n0Rnfim3hoiRoMdluSS+aCBBnyK7lu/hfpasycIhsV7Rq/QRVd0MVykiiKOpQECAyYgASFYIF5cREuA9SBROn/KmVkv2KS0fwFDwvZvsmA3zY4JGuP5Ilgge52g+rd/0iPU+OISmTTxctOMgcW24KvRMlqTZbasn4s=";
-        let response = AuthenticatorAttestationResponse::parse(raw_attestation_object)
+        let response = AuthenticatorAttestationResponse::from_b64_string(raw_attestation_object)
             .ok_or_else(|| panic!("attestation response was none"))
             .unwrap();
         assert_eq!(response.fmt, "none");
+        let authenticator_data = AuthenticatorData::from_bytes(&response.auth_data);
+        let sha_256_digest = digest::digest(&digest::SHA256, "localhost".as_bytes());
+        assert_eq!(sha_256_digest.as_ref(), authenticator_data.rp_id_hash);
     }
 }
