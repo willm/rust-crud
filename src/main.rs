@@ -4,6 +4,7 @@ mod config;
 mod credentials;
 mod db;
 use actix_cors::Cors;
+use actix_files as fs;
 use actix_web::{error, get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use base64::{engine::general_purpose, Engine as _};
 use credentials::post_credentials;
@@ -165,6 +166,11 @@ fn configure(cfg: &mut web::ServiceConfig) {
         //.service(create_blog_post)
         .service(get_credentials)
         .service(post_credentials)
+        .service(
+            fs::Files::new("/", "./client")
+                .index_file("index.html")
+                .show_files_listing(),
+        )
         .app_data(
             web::JsonConfig::default()
                 // register error_handler for JSON extractors.
@@ -180,7 +186,7 @@ async fn main() -> std::io::Result<()> {
     let db = db::PostDatabase::create().await.unwrap();
     HttpServer::new(move || {
         let cors = Cors::default()
-            .allowed_origin("http://localhost:8000")
+            .allowed_origin("http://localhost:8080")
             .allowed_methods(vec!["GET", "POST"])
             .allowed_headers(vec!["Content-Type"])
             .max_age(3600);
